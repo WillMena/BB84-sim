@@ -82,7 +82,7 @@ def calculateQber(Alice_key, Bob_key):
     qber = sum(1 for i in subset if Alice_key[i] != Bob_key[i]) / len(subset) # QBER is error rate so need !=
     return qber
 
-ns = np.arange(10,300,1) 
+ns = np.arange(10,500,5) 
 qbers = [bb84(n) for n in ns]
 
 plt.plot(ns,qbers)
