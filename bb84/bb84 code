@@ -1,144 +1,84 @@
-from qiskit import QuantumCircuit, transpile
-from qiskit_aer import AerSimulator
-
 import numpy as np
 import matplotlib.pyplot as plt
-import random
+from qiskit import QuantumCircuit, transpile
+from qiskit_aer import AerSimulator
+from qiskit_aer.noise import depolarizing_error, pauli_error
 
-random.seed(37)
+rng = np.random.default_rng(37)
+simulator = AerSimulator(method="stabilizer")
 
-def getRandomBitString(numbits):
-    return f"{random.getrandbits(numbits):0{numbits}b}"
+def make_bit_flip_channel(flip_probability):
+    return pauli_error([("X", flip_probability), ("I", 1 - flip_probability)])
 
-def bb84(numqubits):
-    # ALICE
-    alice_bits = getRandomBitString(numqubits)
-    alice_basis = getRandomBitString(numqubits)
+def make_depolarising_channel(depolarising_probability):
+    return depolarizing_error(depolarising_probability, 1)
+
+def bb84_raw(numqubits, eve_present=False, fibre_channel=None):
+    alice_bits  = rng.integers(0, 2, numqubits)
+    alice_basis = rng.integers(0, 2, numqubits)
+    eve_basis   = rng.integers(0, 2, numqubits)
+    bob_basis   = rng.integers(0, 2, numqubits)
+
     circuit = QuantumCircuit(numqubits, numqubits)
 
+    # ALICE prepares
     for qubit_index in range(numqubits):
         if int(alice_bits[qubit_index]) == 1: # if bit is 1, flip |0> to |1>
             circuit.x(qubit_index)
         if int(alice_basis[qubit_index]) == 1: # if basis is 1, new basis is diagonal 
             circuit.h(qubit_index)
-    
-    #print("basis 1 : diagonal, basis 0 : rectilinear")
-    #print(f"{alice_bits} alice sends")
-    #print(f"{alice_basis} alice basis")
 
-    # EVE
-
-    eves_basis = getRandomBitString(numqubits)
-    #print(f"{eves_basis} eve basis")
-
+    # EVE intercept-resend
     for qubit_index in range(numqubits):
-        if int(eves_basis[qubit_index]) == 1: # if 1, measure in diagonal basis
+        if int(eve_basis[qubit_index]) == 1: # if 1, measure in diagonal basis
             circuit.h(qubit_index) # have to put in rectilinear basis to measure (apply Hadamard on |+> or |-> to get |0> or |1>)
             circuit.measure(qubit_index, qubit_index)
             circuit.h(qubit_index) # put back in original basis
-        if int(eves_basis[qubit_index]) == 0: # if 0, measure in rectilinear basis
+        if int(eve_basis[qubit_index]) == 0: # if 0, measure in rectilinear basis
             circuit.measure(qubit_index, qubit_index)
 
-    # BOB
-    bobs_basis = getRandomBitString(numqubits)
+    # FIBRE: the noise channel is literally an instruction in the circuit
+    if fibre_channel is not None:
+        for qubit_index in range(numqubits):
+            circuit.append(fibre_channel, [qubit_index])
 
+    # BOB 
     for qubit_index in range(numqubits):
-        if int(bobs_basis[qubit_index]) == 1: # if 1, measure in diagonal basis
+        if int(bob_basis[qubit_index]) == 1: # if 1, measure in diagonal basis
             circuit.h(qubit_index)
             circuit.measure(qubit_index, qubit_index)
-        if int(bobs_basis[qubit_index]) == 0: # if 0, measure in rectilinear basis
+        if int(bob_basis[qubit_index]) == 0: # if 0, measure in rectilinear basis
             circuit.measure(qubit_index, qubit_index)
-    
-    simulator = AerSimulator(method='stabilizer') #should look at different methods. not specifying makes qiskit autoselect the best one. means we can do more qubits
-    transpiled_circuit = transpile(circuit, simulator) # need to transpile for the simulator to run it, so it can optimize the circuit for the simulator
-    job = simulator.run(transpiled_circuit,shots=1)
-    result = job.result()
-    counts = result.get_counts()
-    #And combine the results
-    bobs_bits = list(counts.keys())[0][::-1] # little-endian so flip values
 
-    #print(f"{bobs_basis} bob basis")
-    #print(f"{bobs_bits} bob bits")
+    job = simulator.run(circuit, shots=1, seed_simulator=int(rng.integers(2**31)))
+    bitstring = list(job.result().get_counts().keys())[0][::-1] # little-endian so flip values
+    bob_bits = np.array([int(bit) for bit in bitstring])
 
-    Alice_key = ""
-    Bob_key = ""
+    return alice_bits, alice_basis, bob_bits, bob_basis
 
-    for i in range(numqubits):
-        if alice_basis[i] == bobs_basis[i]: # if basis match, keep bit
-            Alice_key += alice_bits[i]
-            Bob_key += bobs_bits[i]
+def bb84_pool(total_qubits, chunk_size=1000, **protocol_options):
+    parts = [bb84_raw(min(chunk_size, total_qubits - chunk_start), **protocol_options)
+             for chunk_start in range(0, total_qubits, chunk_size)]
+    return [np.concatenate(arrays) for arrays in zip(*parts)]
 
-    #print(f"Alice's key: {Alice_key}")
-    #print(f"Bob's key: {Bob_key}")
+def sample_qber(n, alice_bits, alice_basis, bob_bits, bob_basis):
+    pool_size = len(alice_bits)
+    sent_qubits = rng.choice(pool_size, size=n, replace=False)
+    bases_match = alice_basis[sent_qubits] == bob_basis[sent_qubits]
+    alice_key, bob_key = alice_bits[sent_qubits][bases_match], bob_bits[sent_qubits][bases_match]
+    checked_bits = rng.choice(len(alice_key), size=len(alice_key) // 2, replace=False)
+    return np.mean(alice_key[checked_bits] != bob_key[checked_bits])
 
-    qber = calculateQber(Alice_key, Bob_key)
-
-    return qber
-
-def calculateQber(Alice_key, Bob_key):
-    subset = random.sample(range(len(Alice_key)), round(len(Alice_key)/2))
-    #print(subset)
-
-    qber = sum(1 for i in subset if Alice_key[i] != Bob_key[i]) / len(subset) # QBER is error rate so need !=
-    return qber
-
-ns = np.arange(10,300,1) 
-qbers = [bb84(n) for n in ns]
+ns = np.unique(np.logspace(np.log10(50), np.log10(1000), 100).astype(int))
+pool_size = 10 * ns.max()
+fibre_channel = make_depolarising_channel(0.1)
+alice_bits, alice_basis, bob_bits, bob_basis = bb84_pool(pool_size, eve_present=True)
+qbers = [sample_qber(n, alice_bits, alice_basis, bob_bits, bob_basis) for n in ns]
 
 plt.plot(ns,qbers)
 plt.axhline(y=0.25, color='r', linestyle='--') # qber = 0.25
+plt.xscale("log")
 plt.xlabel("Number of qubits")
 plt.ylabel("Qber")
-plt.savefig("qber.png")
+plt.savefig("bb84/qber.png")
 plt.show()
-
-# noise
-
-from qiskit_aer.noise import NoiseModel, thermal_relaxation_error, readout_error, depolarizing_error # would be good to try different errors, this one seems most realistic
-
-def bb84_noisy(numqubits):
-    # ALICE
-    alice_bits = getRandomBitString(numqubits)
-    alice_basis = getRandomBitString(numqubits)
-    circuit = QuantumCircuit(numqubits, numqubits)
-
-    for qubit_index in range(numqubits):
-        if int(alice_bits[qubit_index]) == 1: # if bit is 1, flip |0> to |1>
-            circuit.x(qubit_index)
-        if int(alice_basis[qubit_index]) == 1: # if basis is 1, new basis is diagonal 
-            circuit.h(qubit_index)
-    
-    #print("basis 1 : diagonal, basis 0 : rectilinear")
-    #print(f"{alice_bits} alice sends")
-    #print(f"{alice_basis} alice basis")
-
-    # EVE
-
-    eves_basis = getRandomBitString(numqubits)
-    #print(f"{eves_basis} eve basis")
-
-    for qubit_index in range(numqubits):
-        if int(eves_basis[qubit_index]) == 1: # if 1, measure in diagonal basis
-            circuit.h(qubit_index) # have to put in rectilinear basis to measure (apply Hadamard on |+> or |-> to get |0> or |1>)
-            circuit.measure(qubit_index, qubit_index)
-            circuit.h(qubit_index) # put back in original basis
-        if int(eves_basis[qubit_index]) == 0: # if 0, measure in rectilinear basis
-            circuit.measure(qubit_index, qubit_index)
-
-    # BOB
-    bobs_basis = getRandomBitString(numqubits)
-
-    for qubit_index in range(numqubits):
-        if int(bobs_basis[qubit_index]) == 1: # if 1, measure in diagonal basis
-            circuit.h(qubit_index)
-            circuit.measure(qubit_index, qubit_index)
-        if int(bobs_basis[qubit_index]) == 0: # if 0, measure in rectilinear basis
-            circuit.measure(qubit_index, qubit_index)
-    
-    noise_model = NoiseModel()
-    
-    for qubit in range(numqubits):
-        error = thermal_relaxation_error(50e-6, 30e-6, 100e-6) # T1, T2, gate time
-        noise_model.add_quantum_error(error, ['x', 'h'], [qubit])
-        noise_model.add_readout_error(readout_error([0.1, 0.2])) # readout error
-        
