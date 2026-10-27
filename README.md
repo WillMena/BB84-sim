@@ -13,3 +13,11 @@ Goal 3: Noise
 3) Bob measures qubits using his randomly chosen basis. Alice and Bob publicly share their bases choices and discard bits that don't match
 4) Can confirm whether there was an eavedropper based on error rates
 
+## Given that there is noise, and there might be an eavesdropper, can we still send a secure message?
+
+Secure here meaning that if there is an eavesdropper, we know, and can therefore abort. But, if we do not know if there is an eavesdropper then the message is not secure. 
+
+## Eavesdropping and QBER
+
+To consider eavesdropping, we invent a new 'person' Eve. Eve generates a basis in the same way as Alice and Bob
+
