@@ -13,7 +13,7 @@ def make_bit_flip_channel(flip_probability):
 def make_depolarising_channel(depolarising_probability):
     return depolarizing_error(depolarising_probability, 1)
 
-def bb84_raw(numqubits, eve_present=False, fibre_channel=None):
+def bb84_raw(numqubits, eve_present=False, p_eve=1.0, fibre_channel=None):
     alice_bits  = rng.integers(0, 2, numqubits)
     alice_basis = rng.integers(0, 2, numqubits)
     eve_basis   = rng.integers(0, 2, numqubits)
@@ -29,13 +29,16 @@ def bb84_raw(numqubits, eve_present=False, fibre_channel=None):
             circuit.h(qubit_index)
 
     # EVE intercept-resend
-    for qubit_index in range(numqubits):
-        if int(eve_basis[qubit_index]) == 1: # if 1, measure in diagonal basis
-            circuit.h(qubit_index) # have to put in rectilinear basis to measure (apply Hadamard on |+> or |-> to get |0> or |1>)
-            circuit.measure(qubit_index, qubit_index)
-            circuit.h(qubit_index) # put back in original basis
-        if int(eve_basis[qubit_index]) == 0: # if 0, measure in rectilinear basis
-            circuit.measure(qubit_index, qubit_index)
+    if eve_present: 
+        eve_active = rng.random(numqubits) < p_eve # decide which qubits to intercept. rng.random(numqubits) generates array of length numqubits with numbers between 0 and 1
+        for qubit_index in range(numqubits):
+            if eve_active[qubit_index]: # if eve is intercepting this qubit, ie. if random number for this qubit (between 0 and 1) is less than p_eve. if p_eve higher then more likely she intercepts
+                if int(eve_basis[qubit_index]) == 1: # if 1, measure in diagonal basis
+                    circuit.h(qubit_index) # have to put in rectilinear basis to measure (apply Hadamard on |+> or |-> to get |0> or |1>)
+                    circuit.measure(qubit_index, qubit_index)
+                    circuit.h(qubit_index) # put back in original basis
+                if int(eve_basis[qubit_index]) == 0: # if 0, measure in rectilinear basis
+                    circuit.measure(qubit_index, qubit_index)
 
     # FIBRE: the noise channel is literally an instruction in the circuit
     if fibre_channel is not None:
@@ -56,8 +59,8 @@ def bb84_raw(numqubits, eve_present=False, fibre_channel=None):
 
     return alice_bits, alice_basis, bob_bits, bob_basis
 
-def bb84_pool(total_qubits, chunk_size=1000, **protocol_options):
-    parts = [bb84_raw(min(chunk_size, total_qubits - chunk_start), **protocol_options)
+def bb84_pool(total_qubits, chunk_size=1000, **protocol_options): # having separate pool function allows for larger number of qubits than the simulator can handle at once, old method ran the simulator for each point on graph. now we can run the simulator once for a large number of qubits and then sample from that pool to get the qber for different numbers of qubits
+    parts = [bb84_raw(min(chunk_size, total_qubits - chunk_start), eve_present=True, **protocol_options)
              for chunk_start in range(0, total_qubits, chunk_size)]
     return [np.concatenate(arrays) for arrays in zip(*parts)]
 
@@ -82,3 +85,5 @@ plt.xlabel("Number of qubits")
 plt.ylabel("Qber")
 plt.savefig("bb84/qber.png")
 plt.show()
+
+# plot QBER vs Eve's presence probability
