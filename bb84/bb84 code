@@ -60,11 +60,11 @@ def bb84_raw(numqubits, eve_present=False, p_eve=1.0, fibre_channel=None):
     return alice_bits, alice_basis, bob_bits, bob_basis
 
 def bb84_pool(total_qubits, chunk_size=1000, **protocol_options): # having separate pool function allows for larger number of qubits than the simulator can handle at once, old method ran the simulator for each point on graph. now we can run the simulator once for a large number of qubits and then sample from that pool to get the qber for different numbers of qubits
-    parts = [bb84_raw(min(chunk_size, total_qubits - chunk_start), eve_present=True, **protocol_options)
+    parts = [bb84_raw(min(chunk_size, total_qubits - chunk_start),**protocol_options)
              for chunk_start in range(0, total_qubits, chunk_size)]
     return [np.concatenate(arrays) for arrays in zip(*parts)]
 
-def sample_qber(n, alice_bits, alice_basis, bob_bits, bob_basis):
+def sample_qber(n, alice_bits, alice_basis, bob_bits, bob_basis): 
     pool_size = len(alice_bits)
     sent_qubits = rng.choice(pool_size, size=n, replace=False)
     bases_match = alice_basis[sent_qubits] == bob_basis[sent_qubits]
@@ -87,3 +87,12 @@ plt.savefig("bb84/qber.png")
 plt.show()
 
 # plot QBER vs Eve's presence probability
+p_eves = np.linspace(0, 1, 100)
+# fixed number of qubits, vary Eve's presence probability
+qbers_eve = [sample_qber(ns[-1], *bb84_pool(pool_size, eve_present=True, p_eve=p_eve)) for p_eve in p_eves]
+plt.plot(p_eves, qbers_eve)
+plt.xlabel("Eve's presence probability")
+plt.ylabel("Qber")
+plt.title(f"Number of qubits = {ns[-1]}")
+plt.savefig("bb84/qber_vs_eve.png")
+plt.show()
