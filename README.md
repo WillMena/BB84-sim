@@ -1,7 +1,7 @@
-# Cool Quantum BB84 Protocol
+# BB84 Protocol Simulation
 
 Goal 1: Share a secret key  
-Goal 2: Eavesdrop  <!-- spacebar twice at end for newline -->  
+Goal 2: Eavesdrop 
 Goal 3: Noise
 
 ## Theory
